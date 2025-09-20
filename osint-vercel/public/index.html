@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>OSINT Hub — Phone, Vehicle & UPI</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    :root{ --accent:#0ea5a4; }
+    .glass{ background: linear-gradient(180deg, rgba(255,255,255,0.95), rgba(255,255,255,0.9)); backdrop-filter: blur(4px); }
+    .kv { display:flex; gap:0.75rem; padding:0.5rem 0.75rem; border-bottom:1px solid #f1f5f9 }
+    .k { width:40%; font-weight:600 }
+    .v { width:60%; word-break:break-word }
+    .card-short { background:white; border-radius:0.75rem; padding:0.75rem; box-shadow:0 1px 2px rgba(2,6,23,0.06); }
+  </style>
+</head>
+<body class="bg-gray-50 font-sans text-slate-800">
+  <header class="max-w-6xl mx-auto p-6">
+    <h1 class="text-2xl font-semibold">🔍 OSINT Hub</h1>
+    <p class="text-sm text-gray-500">Phone • Vehicle • UPI search</p>
+  </header>
+
+  <main class="max-w-6xl mx-auto p-6 space-y-6">
+    <!-- Phone -->
+    <div class="glass p-6 rounded-2xl shadow-sm border">
+      <h2 class="text-xl font-semibold mb-3">📱 Phone Search</h2>
+      <form id="phone-form" class="flex gap-3 mb-4">
+        <input id="phone-input" type="text" placeholder="Enter 10-digit phone" class="flex-1 p-3 rounded border" />
+        <button class="px-5 py-3 rounded-xl bg-teal-500 text-white">Search</button>
+        <button id="clear-phone" type="button" class="px-4 py-3 rounded-xl border">Clear</button>
+      </form>
+      <div id="phone-log" class="card-short h-40 overflow-auto mb-3">Idle.</div>
+      <div id="phone-output" class="card-short"></div>
+    </div>
+
+    <!-- Vehicle -->
+    <div class="glass p-6 rounded-2xl shadow-sm border">
+      <h2 class="text-xl font-semibold mb-3">🚗 Vehicle Search</h2>
+      <form id="vehicle-form" class="flex gap-3 mb-4">
+        <input id="vehicle-input" type="text" placeholder="Enter RC number (UP61S6030)" class="flex-1 p-3 rounded border" />
+        <button class="px-5 py-3 rounded-xl bg-teal-500 text-white">Search</button>
+        <button id="clear-vehicle" type="button" class="px-4 py-3 rounded-xl border">Clear</button>
+      </form>
+      <div id="vehicle-log" class="card-short h-40 overflow-auto mb-3">Idle.</div>
+      <div id="vehicle-output" class="card-short"></div>
+    </div>
+
+    <!-- UPI -->
+    <div class="glass p-6 rounded-2xl shadow-sm border">
+      <h2 class="text-xl font-semibold mb-3">💳 UPI Search</h2>
+      <form id="upi-form" class="flex gap-3 mb-4">
+        <input id="upi-input" type="text" placeholder="Enter UPI id (example@bank)" class="flex-1 p-3 rounded border" />
+        <button class="px-5 py-3 rounded-xl bg-teal-500 text-white">Search</button>
+        <button id="clear-upi" type="button" class="px-4 py-3 rounded-xl border">Clear</button>
+      </form>
+      <div id="upi-log" class="card-short h-40 overflow-auto mb-3">Idle.</div>
+      <div id="upi-output" class="card-short"></div>
+    </div>
+  </main>
+
+  <footer class="max-w-6xl mx-auto p-6 text-center text-sm text-gray-500">Made by ♥ Rocks </footer>
+
+  <script>
+  // FRONTEND now calls Vercel serverless endpoints under /api/
+  const PHONE_PROXY = '/api/phone';      // expects ?mobile=...
+  const VEHICLE_PROXY = '/api/vehicle';  // expects ?rc_number=...
+  const UPI_PROXY = '/api/upi';          // expects ?upi_id=...
+
+  const EMOJI_MAP = {
+    id:'🆔', Aadhar_number:'🆔',
+    name:'👤', father_name:'👨‍👦', "Father's Name":"👨‍👦", owner:'👤',
+    address:'🏠', Address:'🏠', City:'🏙️', District:'📍', State:'🧭', circle:'📡',
+    Phone:'📞', mobile:'📞', alt_mobile:'📱', contact:'📞', email:'📧',
+    Vehicle:'🚗', rc_number:'🚗', model:'🚗', Maker:'🏭',
+    Insurance:'🛡️', Bank:'🏦', IFSC:'🏦', branch:'🏢', vpa:'💳', status:'📊',
+    Registration:'🗓️', DOB:'📅', Fitness:'💪', Fuel:'⛽'
+  };
+
+  function emojiForKey(k){
+    if(!k) return '🔸';
+    if(EMOJI_MAP[k]) return EMOJI_MAP[k];
+    const lk=k.toLowerCase();
+    if(lk.includes('name')) return '👤';
+    if(lk.includes('father')) return '👨‍👦';
+    if(lk.includes('phone')||lk.includes('mobile')||lk.includes('contact')) return '📞';
+    if(lk.includes('email')) return '📧';
+    if(lk.includes('address')||lk.includes('city')||lk.includes('state')||lk.includes('district')) return '🏠';
+    if(lk.includes('rc')||lk.includes('registration')||lk.includes('maker')||lk.includes('model')) return '🚗';
+    if(lk.includes('upi')||lk.includes('vpa')) return '💳';
+    if(lk.includes('bank')) return '🏦';
+    if(lk.includes('insurance')) return '🛡️';
+    if(lk.includes('fuel')) return '⛽';
+    return '🔸';
+  }
+
+  function renderObject(obj, container, options={excludeSubstrings:[]}){
+    container.innerHTML='';
+    if(!obj){ container.textContent='No data'; return; }
+
+    if(Array.isArray(obj)){
+      obj.forEach((item,i)=>{
+        const h=document.createElement('div'); 
+        h.textContent=`Result ${i+1}`; h.className='font-semibold my-1';
+        container.appendChild(h);
+        container.appendChild(renderKVBlock(item, options));
+      });
+      return;
+    }
+
+    if(obj.details && typeof obj.details==='object'){
+      const h=document.createElement('div'); h.textContent='🚗 Vehicle Details'; h.className='font-semibold my-1';
+      container.appendChild(h); container.appendChild(renderKVBlock(obj.details, options)); delete obj.details;
+    }
+    if(obj.bank_details_raw && typeof obj.bank_details_raw==='object'){
+      const h=document.createElement('div'); h.textContent='🏦 Bank Details'; h.className='font-semibold my-1';
+      container.appendChild(h); container.appendChild(renderKVBlock(obj.bank_details_raw, options)); delete obj.bank_details_raw;
+    }
+    if(obj.vpa_details && typeof obj.vpa_details==='object'){
+      const h=document.createElement('div'); h.textContent='💳 VPA Details'; h.className='font-semibold my-1';
+      container.appendChild(h); container.appendChild(renderKVBlock(obj.vpa_details, options)); delete obj.vpa_details;
+    }
+
+    container.appendChild(renderKVBlock(obj, options));
+  }
+
+  function renderKVBlock(obj, options){
+    const wrap=document.createElement('div');
+    Object.keys(obj).forEach(key=>{
+      const low=key.toLowerCase();
+      let skip=false;
+      for(const sub of (options.excludeSubstrings||[])){ if(low.includes(sub.toLowerCase())){ skip=true; break; } }
+      if(skip) return;
+      const row=document.createElement('div'); row.className='kv';
+      const kdiv=document.createElement('div'); kdiv.className='k'; kdiv.innerHTML=`${emojiForKey(key)} <span>${key}</span>`;
+      const vdiv=document.createElement('div'); vdiv.className='v';
+      const val=obj[key];
+      if(typeof val==='object' && val!==null){ vdiv.textContent=JSON.stringify(val); }
+      else vdiv.textContent=String(val===null?'null':val);
+      row.appendChild(kdiv); row.appendChild(vdiv); wrap.appendChild(row);
+    }); return wrap;
+  }
+
+  function appendLog(el, text){ const d=document.createElement('div'); d.textContent=text; el.appendChild(d); el.scrollTop=el.scrollHeight; }
+
+  async function proxyFetch(path){
+    const res = await fetch(path, { credentials: 'same-origin' });
+    if(!res.ok) throw new Error('HTTP '+res.status);
+    const txt = await res.text();
+    try{ return JSON.parse(txt); } catch { return txt; }
+  }
+
+  // Phone
+  document.getElementById('phone-form').addEventListener('submit', async e=>{
+    e.preventDefault();
+    const v=document.getElementById('phone-input').value.trim();
+    const log=document.getElementById('phone-log'); const out=document.getElementById('phone-output');
+    log.innerHTML=''; out.innerHTML='';
+    if(!/^[0-9]{10}$/.test(v)){ alert('Enter 10-digit number'); return; }
+    appendLog(log,'⏳ Requesting...');
+    try{
+      const data = await proxyFetch(`${PHONE_PROXY}?mobile=${encodeURIComponent(v)}`);
+      appendLog(log,'✅ Done'); renderObject(data,out);
+    } catch(err){ appendLog(log,'❌ '+err.message); out.textContent='Error'; }
+  });
+  document.getElementById('clear-phone').addEventListener('click',()=>{document.getElementById('phone-log').innerHTML='';document.getElementById('phone-output').innerHTML='';});
+
+  // Vehicle
+  document.getElementById('vehicle-form').addEventListener('submit', async e=>{
+    e.preventDefault();
+    const v=document.getElementById('vehicle-input').value.trim();
+    const log=document.getElementById('vehicle-log'); const out=document.getElementById('vehicle-output');
+    log.innerHTML=''; out.innerHTML='';
+    if(!v){ alert('Enter RC number'); return; }
+    appendLog(log,'⏳ Requesting...');
+    try{
+      const data = await proxyFetch(`${VEHICLE_PROXY}?rc_number=${encodeURIComponent(v)}`);
+      appendLog(log,'✅ Done'); renderObject(data,out,{excludeSubstrings:['credit','owner by']});
+    } catch(err){ appendLog(log,'❌ '+err.message); out.textContent='Error'; }
+  });
+  document.getElementById('clear-vehicle').addEventListener('click',()=>{document.getElementById('vehicle-log').innerHTML='';document.getElementById('vehicle-output').innerHTML='';});
+
+  // UPI
+  document.getElementById('upi-form').addEventListener('submit', async e=>{
+    e.preventDefault();
+    const v=document.getElementById('upi-input').value.trim();
+    const log=document.getElementById('upi-log'); const out=document.getElementById('upi-output');
+    log.innerHTML=''; out.innerHTML='';
+    if(!v){ alert('Enter UPI id'); return; }
+    appendLog(log,'⏳ Requesting...');
+    try{
+      const data = await proxyFetch(`${UPI_PROXY}?upi_id=${encodeURIComponent(v)}`);
+      appendLog(log,'✅ Done'); renderObject(data,out);
+    } catch(err){ appendLog(log,'❌ '+err.message); out.textContent='Error'; }
+  });
+  document.getElementById('clear-upi').addEventListener('click',()=>{document.getElementById('upi-log').innerHTML='';document.getElementById('upi-output').innerHTML='';});
+  </script>
+</body>
+</html>
